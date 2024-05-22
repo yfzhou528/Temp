@@ -1,6 +1,7 @@
 import zipfile
 import csv
 import json
+import hashlib
 from collections import defaultdict
 
 
@@ -17,26 +18,42 @@ class ZipComparator:
 
     @staticmethod
     def compare_decimal(str1, str2):
-        # Compare integer parts and first 8 decimal places
         part1, part2 = str1.split('.'), str2.split('.')
-        return part1[0] == part2[0] and part1[1][:8] == part2[1][:8]
+        return part1[0] == part2[0] and part1[1] == part2[1]
 
     @staticmethod
     def parse_row(row):
-        return tuple(csv.reader([row], delimiter='|').__next__())
+        return list(csv.reader([row], delimiter='|'))[0]
+
+    @staticmethod
+    def hash_row(row):
+        parsed_row = ZipComparator.parse_row(row)
+        hash_columns = [parsed_row[i] for i in range(len(parsed_row))]
+
+        for i in [2, 3, 4, 9, 10]:  # 0-based index for columns 3, 4, 5, 10, 11
+            decimal_part = parsed_row[i].split('.')
+            hash_columns[i] = decimal_part[0] + '.' + (decimal_part[1][:8] if len(decimal_part) > 1 else '')
+
+        hash_input = '|'.join(hash_columns)
+        return hashlib.md5(hash_input.encode()).hexdigest()
 
     @staticmethod
     def compare_files(data1, data2):
         differences = []
 
+        if data1 == data2:
+            return True, differences
+
         data1_dict = defaultdict(list)
         data2_dict = defaultdict(list)
 
         for row in data1:
-            data1_dict[ZipComparator.parse_row(row)].append(row)
+            hash_key = ZipComparator.hash_row(row)
+            data1_dict[hash_key].append(row)
 
         for row in data2:
-            data2_dict[ZipComparator.parse_row(row)].append(row)
+            hash_key = ZipComparator.hash_row(row)
+            data2_dict[hash_key].append(row)
 
         all_keys = set(data1_dict.keys()).union(data2_dict.keys())
 
@@ -50,25 +67,7 @@ class ZipComparator:
                 elif rows2 and not rows1:
                     differences.extend([f"Row '{row}' found in file2 but not in file1" for row in rows2])
                 else:
-                    differences.append(f"Different number of rows for key {key}: {len(rows1)} vs {len(rows2)}")
-
-            while rows1:
-                row1 = rows1.pop(0)
-                match_found = False
-                for row2 in rows2:
-                    if all(ZipComparator.compare_decimal(col1, col2) if i in [0, 1, 2] else col1 == col2
-                           for i, (col1, col2) in
-                           enumerate(zip(ZipComparator.parse_row(row1), ZipComparator.parse_row(row2)))):
-                        match_found = True
-                        rows2.remove(row2)
-                        break
-
-                if not match_found:
-                    differences.append(f"Row '{row1}' found in file1 but not in file2")
-
-            while rows2:
-                row2 = rows2.pop(0)
-                differences.append(f"Row '{row2}' found in file2 but not in file1")
+                    differences.append(f"Different number of rows for hash key {key}: {len(rows1)} vs {len(rows2)}")
 
         return not differences, differences
 
@@ -87,10 +86,6 @@ class ZipComparator:
             result, file_differences = ZipComparator.compare_files(data1[file_name], data2[file_name])
             if not result:
                 differences.extend([f"In file '{file_name}': {diff}" for diff in file_differences])
-
-        for file_name in set(data2.keys()) - set(data1.keys()):
-            differences.extend(
-                [f"In file '{file_name}': Row '{row}' found in file2 but not in file1" for row in data2[file_name]])
 
         if differences:
             return {"status": "failed", "diff": differences}
