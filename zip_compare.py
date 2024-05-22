@@ -3,7 +3,7 @@ import csv
 import json
 import hashlib
 from collections import defaultdict
-
+import re
 
 class ZipComparator:
     class ZipComparisonError(Exception):
@@ -17,9 +17,8 @@ class ZipComparator:
             return {name: zip_ref.read(name).decode('utf-8').splitlines() for name in zip_ref.namelist()}
 
     @staticmethod
-    def compare_decimal(str1, str2):
-        part1, part2 = str1.split('.'), str2.split('.')
-        return part1[0] == part2[0] and part1[1] == part2[1]
+    def is_decimal(value):
+        return bool(re.match(r'^-?\d+\.\d+$', value))
 
     @staticmethod
     def parse_row(row):
@@ -28,11 +27,13 @@ class ZipComparator:
     @staticmethod
     def hash_row(row):
         parsed_row = ZipComparator.parse_row(row)
-        hash_columns = [parsed_row[i] for i in range(len(parsed_row))]
+        hash_columns = []
 
-        for i in [2, 3, 4, 9, 10]:  # 0-based index for columns 3, 4, 5, 10, 11
-            decimal_part = parsed_row[i].split('.')
-            hash_columns[i] = decimal_part[0] + '.' + (decimal_part[1][:8] if len(decimal_part) > 1 else '')
+        for i, value in enumerate(parsed_row):
+            if ZipComparator.is_decimal(value):
+                decimal_part = value.split('.')
+                value = decimal_part[0] + '.' + (decimal_part[1][:8] if len(decimal_part) > 1 else '')
+            hash_columns.append(value)
 
         hash_input = '|'.join(hash_columns)
         return hashlib.md5(hash_input.encode()).hexdigest()
@@ -91,7 +92,6 @@ class ZipComparator:
             return {"status": "failed", "diff": differences}
 
         return {"status": "success"}
-
 
 # Example usage
 result = ZipComparator.compare_zip_files('file1.zip', 'file2.zip')
