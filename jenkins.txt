@@ -1,0 +1,27 @@
+pipeline {
+    agent any
+    stages {
+        stage('Setup Conda') {
+            steps {
+                script {
+                    // Initialize Conda
+                    sh 'eval "$(conda shell.bash hook)"'
+                    // Create the environment
+                    sh 'conda env create -f environment.yml'
+                    // Activate the environment
+                    sh 'conda activate myenv'
+                    // Verify environment
+                    sh 'conda list'
+                }
+            }
+        }
+        stage('Run Tests') {
+            steps {
+                script {
+                    // Your test commands here, assuming they run within the activated environment
+                    sh 'python -m unittest discover tests'
+                }
+            }
+        }
+    }
+}
